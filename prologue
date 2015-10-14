@@ -1,0 +1,100 @@
+#!/bin/bash
+# Job Prologue/Epilogue Scripts
+#
+# This script will be executed by owner of "slurmctld" process.
+# It is defined by "SlurmUser" parameter in slurm.conf
+#
+# Environment Variables in Prologue and Epilogue
+#   When invoked, the prologue is called with the following values:
+#	SLURM_JOB_NAME          # sbatch -J xxxx
+#	SLURM_JOB_GROUP         # groupname of owner
+#	SLURM_JOBID             # JOB ID
+#	SLURM_JOB_ID            # JOB ID
+#	SLURM_JOB_USER          # username of owner
+#	SLURM_JOB_UID           # user ID  of owner
+#	SLURM_JOB_NODELIST      # hostlist in SLURM's expression format
+#	SLURM_JOB_GID           # group ID of owner
+#	SLURM_CLUSTER_NAME      # ClusterName (slurm.conf)
+#	SLURM_JOB_PARTITION     # PartitionName (slurm.conf)
+#	SLURM_JOB_EXIT_CODE	# exit code of job (only Epilogue)
+#
+SLURM_ROOT=/usr/local
+RAPLC_ROOT=/usr/local
+SLURM_BIN=${SLURM_ROOT}/bin
+RAPLC_BIN=${RAPLC_ROOT}/bin
+HOSTLISTFILE=/tmp/slurm_hostlist.$$
+
+export PATH=${SLURM_BIN}:${RAPLC_BIN}:/bin:/usr/sbin:/usr/bin
+export TZ=JST-9
+
+if [ "$SLURM_JOB_ID" = "" ]; then
+	exit 0
+fi
+
+if [ ! -x ${SLURM_BIN}/squeue ]; then
+	exit 0
+fi
+
+OTHER="`squeue -l -o %k -h -j $SLURM_JOB_ID 2> /dev/null`"
+if [ "$OTHER" = "" ]; then
+	exit 0
+fi
+
+if [ "$SLURM_JOB_NODELIST" = "" ]; then
+	exit 0
+fi
+
+if [ ! -x ${SLURM_BIN}/scontrol ]; then
+	exit 0
+fi
+
+touch $HOSTLISTFILE
+chmod 600 $HOSTLISTFILE
+if [ ! -f $HOSTLISTFILE ]; then
+	exit 0
+fi
+
+scontrol show hostnames $SLURM_JOB_NODELIST > $HOSTLISTFILE 2> /dev/null
+
+if [ ! -s $HOSTLISTFILE ]; then
+	rm -f $HOSTLISTFILE
+	exit 0
+fi
+
+PACKAGE=`echo $OTHER | awk -F: '{for(i=1;i<=NF;i++){split($i,a,"=");if(a[1] ~/PACKAGE/)print a[2]}}'`
+PP0=`echo $OTHER | awk -F: '{for(i=1;i<=NF;i++){split($i,a,"=");if(a[1] ~/PP0/)print a[2]}}'`
+DRAM=`echo $OTHER | awk -F: '{for(i=1;i<=NF;i++){split($i,a,"=");if(a[1] ~/DRAM/)print a[2]}}'`
+INTERVAL=`echo $OTHER | awk -F: '{for(i=1;i<=NF;i++){split($i,a,"=");if(a[1] ~/INTERVAL/)print a[2]}}'`
+SPEED=`echo $OTHER | awk -F: '{for(i=1;i<=NF;i++){split($i,a,"=");if(a[1] ~/SPEED/)print a[2]}}'`
+
+# print out for checking
+echo PACKAGE  = $PACKAGE >> /tmp/cao.txt
+echo PP0      = $PP0    >> /tmp/cao.txt
+echo DRAM     = $DRAM    >> /tmp/cao.txt
+echo INTERVAL = $INTERVAL    >> /tmp/cao.txt
+echo SPEED    = $SPEED    >> /tmp/cao.txt
+
+RAPLC_ARGS=""
+if [ "$PACKAGE" != "" ]; then
+	RAPLC_ARGS="$RAPLC_ARGS -p $PACKAGE"
+fi
+if [ "$PP0" != "" ]; then
+	RAPLC_ARGS="$RAPLC_ARGS -c $PP0"
+fi
+if [ "$DRAM" != "" ]; then
+	RAPLC_ARGS="$RAPLC_ARGS -d $DRAM"
+fi
+if [ "$INTERVAL" != "" ]; then
+	RAPLC_ARGS="$RAPLC_ARGS -i $INTERVAL"
+fi
+if [ "$SPEED" != "" ]; then
+	RAPLC_ARGS="$RAPLC_ARGS -f $SPEED"
+fi
+
+for HOST in `cat $HOSTLISTFILE`; do
+	raplc $RAPLC_ARGS -s $HOST
+done
+
+rm -f $HOSTLISTFILE
+
+exit 0
